@@ -6,6 +6,8 @@ __pycache__/
 # C extensions
 *.so
 
+ar-101-env/
+
 # Distribution / packaging
 .Python
 build/

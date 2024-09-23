@@ -1,0 +1,14 @@
+{
+    "dockerfile_lines": [],
+    "graphs": {
+      "simple_rag": "./simple_rag.py:graph",
+      "document_grading": "./document_grading.py:graph",
+      "check_hallucination": "./check_hallucination.py:graph",
+      "adaptive_rag": "./adaptive_rag.py:graph"
+    },
+    "env": "./.env",
+    "python_version": "3.11",
+    "dependencies": [
+      "."
+    ]
+  }
