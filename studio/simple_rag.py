@@ -1,6 +1,5 @@
-from langchain import hub
-from langchain_core.output_parsers import StrOutputParser
-from langchain_openai import ChatOpenAI
+from dotenv import load_dotenv
+load_dotenv(dotenv_path=".env", override=True)
 
 ### Build Index
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -36,7 +35,7 @@ docs = [WebBaseLoader(url).load() for url in urls]
 docs_list = [item for sublist in docs for item in sublist]
 # Split
 text_splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
-    chunk_size=500, chunk_overlap=0
+    chunk_size=200, chunk_overlap=0
 )
 doc_splits = text_splitter.split_documents(docs_list)
 # Add to vectorstore
@@ -47,13 +46,29 @@ vectorstore = Chroma.from_documents(
 )
 retriever = vectorstore.as_retriever()
 
-prompt = hub.pull("rlm/rag-prompt")
-print("Prompt Template: ", prompt)
+from langchain_core.output_parsers import StrOutputParser
+from langchain_openai import ChatOpenAI
+
+rag_prompt = """You are an assistant for question-answering tasks. 
+
+Use the following pieces of retrieved context to answer the question. 
+
+If you don't know the answer, just say that you don't know. 
+
+Use three sentences maximum and keep the answer concise.
+
+Question: {question} 
+
+Context: {context} 
+
+Answer:"""
+print("Prompt Template: ", rag_prompt)
 
 llm = ChatOpenAI(model_name="gpt-4o", temperature=0)
 
-from typing import List
-from typing_extensions import TypedDict, Optional
+from langchain.schema import Document
+from typing import List, Optional
+from typing_extensions import TypedDict
 
 class GraphState(TypedDict):
     """
@@ -66,7 +81,9 @@ class GraphState(TypedDict):
     """
     question: str
     generation: Optional[str]
-    documents: Optional[List[str]]
+    documents: Optional[List[Document]]
+
+from langchain_core.messages import HumanMessage
 
 def retrieve_documents(state: GraphState):
     """
@@ -97,9 +114,11 @@ def generate_response(state: GraphState):
     print("---GENERATE RESPONSE---")
     question = state["question"]
     documents = state["documents"]
+    formatted_docs = "\n\n".join(doc.page_content for doc in documents)
+    
     # RAG generation
-    rag_chain = prompt | llm | StrOutputParser()
-    generation = rag_chain.invoke({"context": documents, "question": question})
+    rag_prompt_formatted = rag_prompt.format(context=formatted_docs, question=question)
+    generation = llm.invoke([HumanMessage(content=rag_prompt_formatted)])
     return {"documents": documents, "question": question, "generation": generation}
 
 from langgraph.graph import StateGraph, START, END

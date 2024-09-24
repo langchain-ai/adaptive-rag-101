@@ -1,6 +1,5 @@
-from langchain import hub
-from langchain_core.output_parsers import StrOutputParser
-from langchain_openai import ChatOpenAI
+from dotenv import load_dotenv
+load_dotenv(dotenv_path=".env", override=True)
 
 ### Build Index
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -36,7 +35,7 @@ docs = [WebBaseLoader(url).load() for url in urls]
 docs_list = [item for sublist in docs for item in sublist]
 # Split
 text_splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
-    chunk_size=500, chunk_overlap=0
+    chunk_size=200, chunk_overlap=0
 )
 doc_splits = text_splitter.split_documents(docs_list)
 # Add to vectorstore
@@ -47,13 +46,29 @@ vectorstore = Chroma.from_documents(
 )
 retriever = vectorstore.as_retriever()
 
-prompt = hub.pull("rlm/rag-prompt")
-print("Prompt Template: ", prompt)
+from langchain_core.output_parsers import StrOutputParser
+from langchain_openai import ChatOpenAI
+
+rag_prompt = """You are an assistant for question-answering tasks. 
+
+Use the following pieces of retrieved context to answer the question. 
+
+If you don't know the answer, just say that you don't know. 
+
+Use three sentences maximum and keep the answer concise.
+
+Question: {question} 
+
+Context: {context} 
+
+Answer:"""
+print("Prompt Template: ", rag_prompt)
 
 llm = ChatOpenAI(model_name="gpt-4o", temperature=0)
 
-from typing import List
-from typing_extensions import TypedDict, Optional
+from langchain.schema import Document
+from typing import List, Optional
+from typing_extensions import TypedDict
 
 class GraphState(TypedDict):
     """
@@ -66,7 +81,9 @@ class GraphState(TypedDict):
     """
     question: str
     generation: Optional[str]
-    documents: Optional[List[str]]
+    documents: Optional[List[Document]]
+
+from langchain_core.messages import HumanMessage
 
 def retrieve_documents(state: GraphState):
     """
@@ -97,14 +114,14 @@ def generate_response(state: GraphState):
     print("---GENERATE RESPONSE---")
     question = state["question"]
     documents = state["documents"]
+    formatted_docs = "\n\n".join(doc.page_content for doc in documents)
+    
     # RAG generation
-    rag_chain = prompt | llm | StrOutputParser()
-    generation = rag_chain.invoke({"context": documents, "question": question})
+    rag_prompt_formatted = rag_prompt.format(context=formatted_docs, question=question)
+    generation = llm.invoke([HumanMessage(content=rag_prompt_formatted)])
     return {"documents": documents, "question": question, "generation": generation}
 
 from pydantic import BaseModel, Field
-from langchain_core.prompts import ChatPromptTemplate
-
 
 class GradeDocuments(BaseModel):
     """Binary score for relevance check on retrieved documents."""
@@ -113,20 +130,13 @@ class GradeDocuments(BaseModel):
     )
 
 grade_documents_llm = llm.with_structured_output(GradeDocuments)
-
-
 grade_documents_system_prompt = """You are a grader assessing relevance of a retrieved document to a user question. \n 
     If the document contains keyword(s) or semantic meaning related to the user question, grade it as relevant. \n
     It does not need to be a stringent test. The goal is to filter out erroneous retrievals. \n
     Give a binary score 'yes' or 'no' score to indicate whether the document is relevant to the question."""
-grade_documents_prompt = ChatPromptTemplate.from_messages(
-    [
-        ("system", grade_documents_system_prompt),
-        ("human", "Retrieved document: \n\n {document} \n\n User question: {question}"),
-    ]
-)
+grade_documents_prompt = "Here is the retrieved document: \n\n {document} \n\n Here is the user question: \n\n {question}"
 
-document_relevance_grader = grade_documents_prompt | grade_documents_llm
+from langchain_core.messages import SystemMessage
 
 def grade_documents(state):
     """
@@ -146,8 +156,9 @@ def grade_documents(state):
     # Score each doc
     filtered_docs = []
     for d in documents:
-        score = document_relevance_grader.invoke(
-            {"question": question, "document": d.page_content}
+        grade_documents_prompt_formatted = grade_documents_prompt.format(document=d.page_content, question=question)
+        score = grade_documents_llm.invoke(
+            [SystemMessage(content=grade_documents_system_prompt)] + [HumanMessage(content=grade_documents_prompt_formatted)]
         )
         grade = score.binary_score
         if grade == "yes":
@@ -187,7 +198,7 @@ def decide_to_generate(state):
     
 from langgraph.graph import StateGraph, START, END
 from IPython.display import Image, display
-    
+
 rag_workflow_2 = StateGraph(GraphState)
 rag_workflow_2.add_node("retrieve_documents", retrieve_documents)
 rag_workflow_2.add_node("generate_response", generate_response)
