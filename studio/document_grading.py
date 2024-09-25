@@ -41,7 +41,7 @@ doc_splits = text_splitter.split_documents(docs_list)
 # Add to vectorstore
 vectorstore = Chroma.from_documents(
     documents=doc_splits,
-    collection_name="rag-chroma",
+    collection_name="rag-chroma-2",
     embedding=embd,
 )
 retriever = vectorstore.as_retriever()
